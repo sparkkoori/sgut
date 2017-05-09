@@ -1,0 +1,16 @@
+config_version=3
+config_version=null
+
+[application]
+
+name="Gut Tests"
+main_scene="res://sgut.tscn"
+icon="icon.png"
+
+[editor_plugins]
+
+enabled=PoolStringArray( "gut" )
+
+[memory]
+
+multithread/thread_rid_pool_prealloc=60
