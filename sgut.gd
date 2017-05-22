@@ -7,174 +7,228 @@ export var verbose = false
 export var script_pattern = ""
 export var test_pattern = ""
 
+class Ticker:
+	signal timeout
+	var start = OS.get_ticks_msec()
+	var wait = 0
+	func process(d):
+		if OS.get_ticks_msec() - start > wait:
+			emit_signal("timeout")
+
 #A Testing used for talking to a test.
 class Testing:
+	signal finish
+	signal process
+	signal tested
+
+	var _tested = false
+
 	var parent = null
-	var name = ""
-	var failed = false
-	var verbose = false
+	var method = ""
 
-	func fail():
-		failed = true
+	var finished = false
+	var processors = []
+	var tickers = []
+	var node = null
+	var errors = []
 
-	func is_failed():
-		return failed;
+	func _init(parent,method):
+		self.parent = parent
+		self.method = method
+
+	func process(d):
+		emit_signal("process", d)
+		for p in processors:
+			p.process(d)
+		for p in tickers:
+			p.process(d)
+
+	func simulate(p):
+		processors.append(p)
+
+	func set_node(n):
+		node = n
+		parent.parent.sgut.add_child(n)
+
+	func wait(ms):
+		var t = Ticker.new()
+		t.wait = ms
+		tickers.append(t)
+		t.connect("timeout",self,"_removeTicker",[t])
+		return t
+
+	func _removeTicker(t):
+		var i = tickers.find(t)
+		tickers.remove(i)
+
+	func error(s):
+		errors.append(s)
+		info(s)
 
 	func info(s):
-		if verbose:
-			parent.print_if()
+		if parent.parent.sgut.verbose:
 			print(s)
 
-	func fatal(s):
-		parent.print_if()
-		print(s)
-		fail()
+	func fail(s):
+		error(s)
+		finish()
+
+	func is_failed():
+		return errors.size() != 0;
+
+	func finish():
+		finished = true
+		emit_signal("finish")
+
+	func test():
+		var ret = parent.obj.callv(method,[self])
+		if !is_func_state(ret):
+			if !finished:
+				finish()
+		else:
+			yield(self,"finish")
+
+		if node != null:
+			parent.parent.sgut.remove_child(node)
+
+		report()
+		emit_signal("tested")
+		_tested = true
 
 	func report():
-		parent.print_if()
-		if failed:
-			print("xx                           " + name)
+		if is_failed():
+			print("xx  " + method)
+			for e in errors:
+				print("      - " + e)
 		else:
-			print("ok                           " + name)
+			print("ok  " + method)
+
+	func is_func_state(v):
+		if typeof(v) != TYPE_OBJECT:
+			return false
+		elif v.is_class("GDFunctionState"):
+			return true
+		else:
+			return false
+
 
 #ScriptTesting contains many Testings.
 class ScriptTesting:
+	signal tested
+
+	var _tested = false
+
+	var parent = null
+	var obj = null
 	var path = ""
 	var tests = []
-	var dp = ""
-	var verbose = false
+	var current = []
 
-	func delay_print(s):
-		dp = s
+	func _init(parent,path):
+		self.parent = parent
+		self.path = path
+		self.obj = load(path).new()
 
-	func print_if():
-		if dp != "":
-			print(dp)
-			dp = ""
+		var methods = self.obj.get_method_list()
+		var sgut = parent.sgut
+		for m in methods:
+			if m.name.begins_with("test_"):
+				if sgut.test_pattern == "" || m.name.matchn("*"+sgut.test_pattern+"*"):
+					var t = Testing.new(self,m.name)
+					tests.append(t)
+
+	func process(d):
+		for t in current:
+			t.process(d)
 
 	func info(s):
-		if verbose:
-			print_if()
+		if parent.sgut.verbose:
 			print(s)
 
-#Func state for run.
+	func test():
+		print("test: " + path)
+
+		if obj.has_method("setup"):
+			obj.callv("setup",[self])
+
+		for t in tests:
+			t.test()
+			current = [t]
+			if !t._tested:
+				yield(t,"tested")
+
+		if obj.has_method("teardown"):
+			obj.callv("teardown",[self])
+
+		emit_signal("tested")
+		_tested = true
+
+class RootTesting:
+	signal tested
+
+	var _tested = false
+
+	var sgut = null
+	var script_tests = []
+	var current = []
+
+	func _init(sgut):
+		self.sgut = sgut
+
+		var scripts = []
+		sgut.locate_scripts("res://",scripts)
+		for path in scripts:
+			var t = ScriptTesting.new(self,path)
+			script_tests.append(t)
+
+	func test():
+		print("sgut: ----------------------------------------------------")
+
+		for st in script_tests:
+			st.test()
+			current = [st]
+			if !st._tested:
+				yield(st,"tested")
+
+		report()
+		emit_signal("tested")
+		_tested = true
+
+	func report():
+		var tests= []
+		var failed_tests = []
+		for s in script_tests:
+			for t in s.tests:
+				tests.append(t)
+				if t.is_failed():
+					failed_tests.append(t)
+
+		print("sgut: " + str(script_tests.size()) + " scripts " + str(tests.size()) + " tests " + str(failed_tests.size()) +" failed")
+
+	func process(d):
+		for t in current:
+			t.process(d)
+
 var running = null
 
-#Run if autorun be set.
+#autorun.
 func _ready():
 	set_process(true)
 	running = run()
 
-func _process(delta):
-	if is_func_state(running):
-		running = running.resume(delta)
+func _process(d):
+	if running != null:
+		if running._tested:
+			running = null
+		else:
+			running.process(d)
 
 
 #Run tests, respects changes on sources.
 func run():
-	var scripts = []
-	locate_scripts("res://",scripts)
-
-	var ret = cocall("run_script",scripts)
-	while is_func_state(ret):
-		var delta = yield()
-		ret = ret.resume(delta)
-
-	var tests= []
-	var failed_tests = []
-	for s in ret:
-		for t in s.tests:
-			tests.append(t)
-			if t.is_failed():
-				failed_tests.append(t)
-
-	print("sgut: " + str(ret.size()) + " scripts " + str(tests.size()) + " tests " + str(failed_tests.size()) +" failed")
-
-	return null
-
-
-#run_script run a gd script.
-func run_script(path):
-	var testing = ScriptTesting.new()
-	testing.path = path
-	testing.verbose = verbose
-
-	#instead of direct print, it use delay_print
-	testing.delay_print("sgut: " + path)
-
-	var script = load(path).new()
-	if script extends Node:
-		add_child(script)
-
-	if script.has_method("setup"):
-		script.callv("setup",[testing])
-
-	var methods = script.get_method_list()
-	var args_arr = []
-	for m in methods:
-		if m.name.begins_with("test_"):
-			if test_pattern == "" || m.name.matchn("*"+test_pattern+"*"):
-				args_arr.append([script,m.name,testing])
-			pass
-
-	var ret = cocall("run_test",args_arr)
-	while is_func_state(ret):
-		var delta = yield()
-		testing.delay_print("sgut: " + path)
-		ret = ret.resume(delta)
-	testing.tests = ret
-
-	if script.has_method("teardown"):
-		script.callv("teardown",[testing])
-
-	if script extends Node:
-		remove_child(script)
-
-	return testing
-
-
-#run_test run a test in a script.
-func run_test(script,method,parent):
-	var testing = Testing.new()
-	testing.name = method
-	testing.parent = parent
-	testing.verbose = verbose
-	var ret = script.callv(method,[testing])
-
-	while is_func_state(ret):
-		var delta = yield()
-		ret = ret.resume(delta)
-
-	testing.report()
-	return testing
-
-func cocall(fname,args_arr):
-	var goings = []
-	var results = []
-
-	for args in args_arr:
-		var ret
-		if typeof(args) == TYPE_ARRAY:
-			ret = callv(fname,args)
-		else:
-			ret = callv(fname,[args])
-
-		if is_func_state(ret):
-			goings.append(ret)
-		else:
-			results.append(ret)
-
-	while goings.size()>0:
-		var delta = yield()
-		var new_goings = []
-		for go in goings:
-			var ret = go.resume(delta)
-			if is_func_state(ret):
-				new_goings.append(ret)
-			else:
-				results.append(ret)
-		goings = new_goings
-	return results
+	var at = RootTesting.new(self)
+	at.test()
+	return at
 
 #test_scripts recurvisly search *_test.gd
 #Ignore .* and addons.
@@ -206,11 +260,3 @@ func locate_scripts(dir_path,files):
 				files.append(full_path)
 		thing = d.get_next()
 	d.list_dir_end()
-
-func is_func_state(v):
-	if typeof(v) != TYPE_OBJECT:
-		return false
-	elif v.is_class("GDFunctionState"):
-		return true
-	else:
-		return false

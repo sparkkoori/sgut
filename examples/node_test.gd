@@ -1,7 +1,6 @@
 extends Node
 
-var quit = false
-var t = null
+signal sig
 
 func _ready():
 	var btn = Button.new()
@@ -19,13 +18,17 @@ func _ready():
 	add_child(btn2)
 
 func test_foo(t):
-	self.t = t
-	while !quit:
-		yield()
+	t.set_node(self)
+
+	var ok = yield(self,"sig")
+	if !ok:
+		t.fail("fail")
+		return
+
+	t.finish()
 
 func _pass():
-	quit = true
+	emit_signal("sig", true)
 
 func _fail():
-	self.t.fail()
-	quit = true
+	emit_signal("sig", false)

@@ -3,26 +3,20 @@ func setup(t):
 	t.info("setup")
 
 func test_pass(t):
-	pass
+	t.finish()
 
 func test_fail(t):
-	t.fail()
+	t.error("error1")
+	t.fail("error2")
 
 func test_info(t):
 	t.info("info")
-	t.fail()
+	t.error("error")
 
-func test_yield(t):
-	for i in range(60):
-		yield()
-
-	t.info("yield done")
-
-func test_yield2(t):
-	for i in range(60):
-		yield()
-
-	t.info("yield done")
+func test_wait(t):
+	t.info("waiting")
+	yield(t.wait(1000),"timeout")
+	t.finish()
 
 func teardown(t):
 	t.info("teardown")
