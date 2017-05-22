@@ -15,7 +15,8 @@ sgut (Simple Godot Unit Test) is a unit test tool for godot(gdscript)
 
 		func test_yield(t):
 			#do something
-			yield()
+			yield(obj,"signal")
 			#do something
+			t.finish()
 	```
 0. Run the scene.
