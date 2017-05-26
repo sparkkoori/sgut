@@ -46,9 +46,8 @@ class Testing:
 	func simulate(p):
 		processors.append(p)
 
-	func set_node(n):
-		node = n
-		parent.parent.sgut.add_child(n)
+	func add_node(n):
+		node.add_child(n)
 
 	func wait(ms):
 		var t = Ticker.new()
@@ -81,6 +80,9 @@ class Testing:
 		emit_signal("finish")
 
 	func test():
+		node = Node.new()
+		parent.parent.sgut.add_child(node)
+
 		var ret = parent.obj.callv(method,[self])
 		if !is_func_state(ret):
 			if !finished:
@@ -88,8 +90,7 @@ class Testing:
 		else:
 			yield(self,"finish")
 
-		if node != null:
-			parent.parent.sgut.remove_child(node)
+		node.queue_free()
 
 		report()
 		emit_signal("tested")

@@ -18,7 +18,7 @@ func _ready():
 	add_child(btn2)
 
 func test_foo(t):
-	t.set_node(self)
+	t.add_node(self)
 
 	var ok = yield(self,"sig")
 	if !ok:
